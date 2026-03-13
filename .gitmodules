@@ -1,0 +1,3 @@
+[submodule "3rdparty/Inflatables"]
+	path = 3rdparty/Inflatables
+	url = git@github.com:InflatableStructures/Inflatables.git

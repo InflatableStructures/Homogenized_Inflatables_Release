@@ -1,0 +1,5 @@
+pybind11_add_module(homogenized_inflation homogenized_inflation.cc)
+set_target_properties(homogenized_inflation PROPERTIES CXX_STANDARD 14)
+set_target_properties(homogenized_inflation PROPERTIES CXX_STANDARD_REQUIRED ON)
+set_target_properties(homogenized_inflation PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/python)
+target_link_libraries(homogenized_inflation PUBLIC homogenized_inflatable_lib inflation_lib  intel_pybind_14_hack)
