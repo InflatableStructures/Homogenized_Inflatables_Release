@@ -6,14 +6,14 @@
 #include <functional>
 
 #include <MeshFEM/ElasticityTensor.hh>
-
+#include <MeshFEM/SparseMatrices.hh>
 
 ////////////////////////////////////////////////////////////////////////////
 // Bending Stiffness analysis
 ////////////////////////////////////////////////////////////////////////////
 
 template<class IPU>
-Real getBendingStiffnessHelper(IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFactorizerBase &solver, size_t num_Fu, std::vector<size_t> fixedVars = {});
+Real getBendingStiffnessHelper(IPU &ipu, SuiteSparseMatrix &hessian, CholmodFactorizer &solver, size_t num_Fu, std::vector<size_t> fixedVars = {});
 
 template<class IPU>
 Eigen::VectorXd getBendingStiffness(IPU &ipu, Eigen::VectorXd alphas, NewtonOptimizer &opt, Real hessianShift = 0, std::vector<size_t> fixedVars = {});
@@ -29,10 +29,10 @@ std::pair<Eigen::VectorXd, Eigen::VectorXd> get_bending_equilibrium_sensitivity(
 // Stretching Stiffness analysis
 ////////////////////////////////////////////////////////////////////////////
 template<class IPU>
-Eigen::Matrix3d getTangentElasticityTensorHelper(const IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFactorizerBase &solver, std::vector<size_t> fixedVars = {});
+Eigen::Matrix3d getTangentElasticityTensorHelper(const IPU &ipu, SuiteSparseMatrix &hessian, CholmodFactorizer &solver, std::vector<size_t> fixedVars = {});
 
 template<class IPU>
-ElasticityTensor<Real, 2> getTangentElasticityTensor(const IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFactorizerBase &solver, std::vector<size_t> fixedVars = {});
+ElasticityTensor<Real, 2> getTangentElasticityTensor(const IPU &ipu, SuiteSparseMatrix &hessian, CholmodFactorizer &solver, std::vector<size_t> fixedVars = {});
 
 template<class IPU>
 Eigen::VectorXd getStretchingStiffness(const IPU &ipu, Eigen::VectorXd betas, NewtonOptimizer &opt, Real hessianShift = 1e-10, std::vector<size_t> fixedVars = {});

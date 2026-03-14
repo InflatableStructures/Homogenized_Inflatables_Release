@@ -12,7 +12,7 @@ Eigen::VectorXd getHessianColHead(const SuiteSparseMatrix &hessian, size_t colId
 
 
 template<class IPU>
-Real getBendingStiffnessHelper(IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFactorizerBase &solver, size_t num_Fu, std::vector<size_t> fixedVars) {
+Real getBendingStiffnessHelper(IPU &ipu, SuiteSparseMatrix &hessian, NewtonOptimizer &opt, size_t num_Fu, std::vector<size_t> fixedVars) {
     // The stiffness computation assumes the structure is in equilibrium with respect to all variables except the bending variables (kappa, alpha).
     // Construct the RHS vector for the linear system to solve.
     Eigen::VectorXd minus_d_E_d_Fu_d_kappa = -1 * getHessianColHead(hessian, num_Fu, ipu.numVars());
@@ -22,12 +22,11 @@ Real getBendingStiffnessHelper(IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFac
     }
     // Get the diagonal entry corresponding to kappa.
     Real dE_d_kappa_d_kappa = hessian.Ax[hessian.findDiagEntry(num_Fu)];
-
     // Solve the linear system.
     Eigen::VectorXd d_Fu_star_d_kappa;
     d_Fu_star_d_kappa.resize(ipu.numVars());
     d_Fu_star_d_kappa.setZero();
-    solver.solve(minus_d_E_d_Fu_d_kappa, d_Fu_star_d_kappa);
+    opt.newton_step(d_Fu_star_d_kappa, -1 * minus_d_E_d_Fu_d_kappa);
 
     // // Optionally transform the fluctuation displacement perturbation to remove the vertical offset. 
     // if (!ipu.average_z_reparametrization) {
@@ -41,7 +40,7 @@ Real getBendingStiffnessHelper(IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFac
     //     }
     //     ipu.setVars(curr_vars);
     // }
-    return dE_d_kappa_d_kappa - minus_d_E_d_Fu_d_kappa.dot(d_Fu_star_d_kappa);
+    return dE_d_kappa_d_kappa - minus_d_E_d_Fu_d_kappa.dot(d_Fu_star_d_kappa) * ipu.areaFactor();
 }
 
 // template<class IPU>
@@ -102,9 +101,7 @@ std::pair<Eigen::VectorXd, Eigen::VectorXd> getBendingStiffnessUsingBases(IPU &i
     bool success = false;
     size_t n_attempts = 0;
 
-    SuiteSparseMatrix h = ipu.hessian();
-    h.scale(1.0 / ipu.areaFactor());
-    opt.solver().factorizeNumericWithShift(h, hessianShift);
+    opt.update_factorizations_shiftedHessian(hessianShift * ipu.areaFactor());
     while ((!success) && (n_attempts < 3)) {
         try {
             std::cout<<"Stiffness control point shift: "<<shift<<std::endl;
@@ -114,9 +111,9 @@ std::pair<Eigen::VectorXd, Eigen::VectorXd> getBendingStiffnessUsingBases(IPU &i
                 curr_vars(ipu.numVars() - 1) = theta;
                 ipu.setVars(curr_vars); 
                 // Use the area factor to scale the hessian for energy density defined on the size of the patch at equilibrium state. Essentially we are treating the equilibrium state as the rest state when computing stiffness. 
-                h = ipu.hessian();
+                SuiteSparseMatrix h = ipu.hessian();
                 h.scale(1.0 / ipu.areaFactor());
-                test_stiffness(i) = getBendingStiffnessHelper(ipu, h, opt.solver(), num_Fu, fixedVars);
+                test_stiffness(i) = getBendingStiffnessHelper(ipu, h, opt, num_Fu, fixedVars);
                 A.row(i) = get_coeffs(theta);
             }
             std::cout<<"succeed attempt!"<<std::endl;
@@ -147,13 +144,15 @@ std::pair<Eigen::VectorXd, Eigen::VectorXd> get_bending_equilibrium_sensitivity(
     Real original_alpha = ipu.get_alpha();
     Eigen::VectorXd curr_vars = ipu.getVars();
     size_t num_Fu = ipu.numMacroFVars() + ipu.numFluctuationDisplacementVars();
+    opt.setFixedVars(fixedVars);
 
     SuiteSparseMatrix h = ipu.hessian();
 
     curr_vars(ipu.numVars() - 1) = alpha;
     ipu.setVars(curr_vars); 
+    opt.update_factorizations_shiftedHessian(hessianShift * ipu.areaFactor());
 
-    opt.solver().factorizeNumericWithShift(h, hessianShift);
+
 
     // Construct the RHS vector for the linear system to solve.
     Eigen::VectorXd minus_d_E_d_Fu_d_kappa = -1 * getHessianColHead(h, num_Fu, ipu.numVars());
@@ -168,7 +167,10 @@ std::pair<Eigen::VectorXd, Eigen::VectorXd> get_bending_equilibrium_sensitivity(
     Eigen::VectorXd d_Fu_star_d_kappa;
     d_Fu_star_d_kappa.resize(ipu.numVars());
     d_Fu_star_d_kappa.setZero();
-    opt.solver().solve(minus_d_E_d_Fu_d_kappa, d_Fu_star_d_kappa);
+
+    opt.newton_step(d_Fu_star_d_kappa, -1 * minus_d_E_d_Fu_d_kappa);
+    d_Fu_star_d_kappa *= ipu.areaFactor();
+
 
     d_Fu_star_d_kappa.tail(ipu.numMacroRVars()).setZero();
     for (size_t i = 0; i < fixedVars.size(); ++i) {
@@ -185,7 +187,7 @@ std::pair<Eigen::VectorXd, Eigen::VectorXd> get_bending_equilibrium_sensitivity(
 
 
 template<class IPU>
-Eigen::Matrix3d getTangentElasticityTensorHelper(const IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFactorizerBase &solver, std::vector<size_t> fixedVars) {
+Eigen::Matrix3d getTangentElasticityTensorHelper(const IPU &ipu, SuiteSparseMatrix &hessian, CholmodFactorizer &solver, std::vector<size_t> fixedVars) {
     // fixedVars should include F, kappa, alpha, and the fixed variables in the macro variables.
     // Use the full hessian.
     hessian.reflectUpperTriangle();
@@ -224,7 +226,7 @@ Eigen::Matrix3d getTangentElasticityTensorHelper(const IPU &ipu, SuiteSparseMatr
 }
 
 template<class IPU>
-ElasticityTensor<Real, 2> getTangentElasticityTensor(const IPU &ipu, SuiteSparseMatrix &hessian, CholeskyFactorizerBase &solver, std::vector<size_t> fixedVars) {
+ElasticityTensor<Real, 2> getTangentElasticityTensor(const IPU &ipu, SuiteSparseMatrix &hessian, CholmodFactorizer &solver, std::vector<size_t> fixedVars) {
     // fixedVars should include F, kappa, alpha, and the fixed variables in the macro variables.
     Eigen::Matrix3d result = getTangentElasticityTensorHelper(ipu, hessian, solver, fixedVars);
     for (size_t i = 0; i < 3; ++i) {
@@ -245,9 +247,11 @@ Eigen::VectorXd getStretchingStiffness(const IPU &ipu, Eigen::VectorXd betas, Ne
     
     SuiteSparseMatrix h = ipu.hessian();
     h.scale(1.0 / ipu.areaFactor());
-    opt.solver().factorizeNumericWithShift(h, hessianShift);
+    opt.update_factorizations_shiftedHessian(hessianShift);
 
-    ElasticityTensor<Real, 2> tangentElasticityTensor = getTangentElasticityTensor(ipu, h, opt.solver(), fixedVars);
+
+
+    ElasticityTensor<Real, 2> tangentElasticityTensor = getTangentElasticityTensor(ipu, h, opt.solver, fixedVars);
     // Compute the inverse of the tensor.
     ElasticityTensor<Real, 2> inverse_tangentElasticityTensor = tangentElasticityTensor.inverse();
     Eigen::VectorXd stretching_stiffness(betas.size());
@@ -263,9 +267,8 @@ template<class IPU>
 Eigen::Matrix3d debugTangentElasticityTensor(const IPU &ipu, Eigen::VectorXd betas, NewtonOptimizer &opt, Real hessianShift, std::vector<size_t> fixedVars) {
     SuiteSparseMatrix h = ipu.hessian();
     h.scale(1.0 / ipu.areaFactor());
-    opt.solver().factorizeNumericWithShift(h, hessianShift);
-
-    return getTangentElasticityTensorHelper(ipu, h, opt.solver(), fixedVars);
+    opt.update_factorizations_shiftedHessian(hessianShift);
+    return getTangentElasticityTensorHelper(ipu, h, opt.solver, fixedVars);
 }
 
 // Explicit instantiation for the two supported IPU types.

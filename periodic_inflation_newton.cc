@@ -24,7 +24,6 @@ struct PeriodicInflationNewtonProblem : public NewtonProblem {
 
     void setCustomIterationCallback(const CallbackFunction &cb) { m_customCallback = cb; }
 
-    bool providesMetric() const override { return false; }
 
     virtual SuiteSparseMatrix hessianSparsityPattern() const override { /* m_hessianSparsity.fill(1.0); */ return m_hessianSparsity; }
     // The maximum factor by which we allow the elastic energy to increase in a single
@@ -32,21 +31,25 @@ struct PeriodicInflationNewtonProblem : public NewtonProblem {
     // severly deforming the mesh into a bad configuration.
     Real systemEnergyIncreaseFactorLimit = safe_numeric_limits<Real>::max();
     Real energyLimitingThreshold = 1e-6;
-    
+
 protected:
     virtual void m_evalHessian(SuiteSparseMatrix &result, bool /* projectionMask */) const override {
         result.setZero();
         m_sheet.hessian(result);
+
+        if (hessianShift != 0.0) {
+            result.addScaledIdentity(hessianShift);
+        }
     }
     virtual void m_evalMetric(SuiteSparseMatrix &result) const override {
         // TODO: mass matrix?
         result.setIdentity(true);
     }
 
-    virtual bool m_iterationCallback(size_t i) override { 
+    virtual void m_iterationCallback(size_t i) override { 
         m_currSystemEnergy = m_sheet.systemEnergy();
-        if (m_customCallback) return m_customCallback(i); 
-        return false; // don't exit early
+        if (m_customCallback) m_customCallback(i); 
+        // return false; // don't exit early
     }
 
     CallbackFunction m_customCallback;
